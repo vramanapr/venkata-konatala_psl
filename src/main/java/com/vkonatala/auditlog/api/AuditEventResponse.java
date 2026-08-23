@@ -29,7 +29,7 @@ public record AuditEventResponse(
                 record.resourceId(),
                 record.occurredAt(),
                 record.recordedAt(),
-                record.payload(),
+                record.presentationPayload(),
                 record.contentHash(),
                 record.previousHash());
     }

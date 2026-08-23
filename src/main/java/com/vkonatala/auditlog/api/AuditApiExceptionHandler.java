@@ -1,6 +1,7 @@
 package com.vkonatala.auditlog.api;
 
 import com.vkonatala.auditlog.domain.append.IdempotencyConflictException;
+import com.vkonatala.auditlog.domain.redaction.RedactionConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -27,6 +28,13 @@ public class AuditApiExceptionHandler {
     @ExceptionHandler(IdempotencyConflictException.class)
     ResponseEntity<Map<String, String>> handleIdempotencyConflict(
             IdempotencyConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", exception.getMessage()));
+    }
+
+    @ExceptionHandler(RedactionConflictException.class)
+    ResponseEntity<Map<String, String>> handleRedactionConflict(
+            RedactionConflictException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("error", exception.getMessage()));
     }

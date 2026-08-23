@@ -3,6 +3,7 @@ package com.vkonatala.auditlog.api;
 import com.vkonatala.auditlog.application.append.AuditLogAppender;
 import com.vkonatala.auditlog.application.query.AuditQueryResult;
 import com.vkonatala.auditlog.application.query.AuditQueryService;
+import com.vkonatala.auditlog.application.redaction.AuditRedactionService;
 import com.vkonatala.auditlog.application.verify.AuditChainVerifier;
 import com.vkonatala.auditlog.application.verify.AuditVerificationResult;
 import com.vkonatala.auditlog.domain.query.AuditQueryCriteria;
@@ -12,12 +13,14 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/audit")
@@ -26,6 +29,8 @@ public class AuditController {
     private final AuditLogAppender appender;
     private final AuditQueryService queryService;
     private final AuditChainVerifier verifier;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AuditRedactionService redactionService;
 
     public AuditController(
             AuditLogAppender appender,
@@ -69,6 +74,18 @@ public class AuditController {
         return new AuditEventPage(
                 result.records().stream().map(AuditEventResponse::from).toList(),
                 result.nextSequence());
+    }
+
+    @PostMapping("/events/{recordId}/redactions")
+    public AuditRedactionResponse redact(
+            @PathVariable UUID recordId,
+            @Valid @org.springframework.web.bind.annotation.RequestBody AuditRedactionRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        if (redactionService == null) {
+            throw new IllegalStateException("Redaction service is unavailable");
+        }
+        return AuditRedactionResponse.from(
+                redactionService.redact(recordId, request.toDomain(), idempotencyKey));
     }
 
     @GetMapping("/verify")

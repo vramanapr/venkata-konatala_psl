@@ -7,6 +7,7 @@ import com.vkonatala.auditlog.domain.hash.AuditHash;
 import com.vkonatala.auditlog.domain.hash.AuditHashChain;
 import com.vkonatala.auditlog.domain.append.AuditRecord;
 import com.vkonatala.auditlog.domain.append.IdempotencyConflictException;
+import com.vkonatala.auditlog.domain.redaction.FieldCommitmentService;
 import com.vkonatala.auditlog.persistence.append.AuditRecordRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -26,24 +27,38 @@ public class AuditLogAppender {
     private final AuditHashChain hashChain;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final FieldCommitmentService fieldCommitmentService;
 
     @Autowired
     public AuditLogAppender(
             AuditRecordRepository repository,
             AuditHashChain hashChain,
+            ObjectMapper objectMapper,
+            FieldCommitmentService fieldCommitmentService) {
+        this(repository, hashChain, objectMapper, Clock.systemUTC(), fieldCommitmentService);
+    }
+
+    public AuditLogAppender(
+            AuditRecordRepository repository,
+            AuditHashChain hashChain,
             ObjectMapper objectMapper) {
-        this(repository, hashChain, objectMapper, Clock.systemUTC());
+        this(repository, hashChain, objectMapper, Clock.systemUTC(),
+                new FieldCommitmentService(objectMapper,
+                        new com.vkonatala.auditlog.domain.hash.Sha256HashService(
+                                new com.vkonatala.auditlog.domain.hash.CanonicalJsonSerializer())));
     }
 
     AuditLogAppender(
             AuditRecordRepository repository,
             AuditHashChain hashChain,
             ObjectMapper objectMapper,
-            Clock clock) {
+            Clock clock,
+            FieldCommitmentService fieldCommitmentService) {
         this.repository = repository;
         this.hashChain = hashChain;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.fieldCommitmentService = fieldCommitmentService;
     }
 
     @Transactional(timeout = 30)
@@ -87,9 +102,19 @@ public class AuditLogAppender {
                 event.payload(),
                 PAYLOAD_SCHEMA_VERSION,
                 auditHash.contentHash(),
-                auditHash.previousHash());
+                auditHash.previousHash(),
+                hashChain.hashEventContent(event.payload()),
+                event.payload(),
+                hashChain.hashEventContent(event.payload()),
+                1);
 
         repository.insert(record);
+        for (var commitment : fieldCommitmentService.generate(record.recordId(), event.payload())) {
+            repository.insertFieldCommitment(
+                    UUID.randomUUID(), record.recordId(), commitment.path(),
+                    FieldCommitmentService.FORMAT_VERSION,
+                    FieldCommitmentService.ALGORITHM, commitment.digest(), commitment.salt());
+        }
         if (idempotencyKey != null) {
             repository.insertIdempotency(idempotencyKey, requestFingerprint, record.recordId());
         }

@@ -57,8 +57,10 @@ public class AuditRecordRepository {
                 INSERT INTO audit_record
                     (record_id, chain_id, sequence, event_type, actor_id, resource_type,
                      resource_id, occurred_at, recorded_at, payload_document,
-                     payload_schema_version, content_hash, previous_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                     payload_schema_version, content_hash, previous_hash,
+                     payload_commitment, presentation_payload, presentation_hash,
+                     canonicalization_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?)
                 """,
                 record.recordId(),
                 record.chainId(),
@@ -71,7 +73,11 @@ public class AuditRecordRepository {
                 toJson(record.payload()),
                 record.payloadSchemaVersion(),
                 record.contentHash(),
-                record.previousHash());
+                record.previousHash(),
+                record.payloadCommitment(),
+                toJson(record.presentationPayload()),
+                record.presentationHash(),
+                record.canonicalizationVersion());
     }
 
     public void updateChainHead(String chainId, long nextSequence, UUID lastRecordId, String lastHash) {
@@ -113,7 +119,9 @@ public class AuditRecordRepository {
         return jdbcTemplate.query("""
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record
                 WHERE record_id = ?
                 """, resultSet -> {
@@ -128,7 +136,9 @@ public class AuditRecordRepository {
         StringBuilder sql = new StringBuilder("""
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record
                 WHERE chain_id = ?
                   AND archived_at IS NULL
@@ -181,13 +191,17 @@ public class AuditRecordRepository {
         return jdbcTemplate.query("""
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record
                 WHERE chain_id = ? AND archived_at IS NULL
                 UNION ALL
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record_archive
                 WHERE chain_id = ?
                 ORDER BY sequence
@@ -207,7 +221,9 @@ public class AuditRecordRepository {
         List<AuditRecord> eligibleRecords = jdbcTemplate.query("""
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record
                 WHERE archived_at IS NULL
                   AND recorded_at < ?
@@ -222,8 +238,10 @@ public class AuditRecordRepository {
                     INSERT INTO audit_record_archive
                         (record_id, chain_id, sequence, event_type, actor_id, resource_type,
                          resource_id, occurred_at, recorded_at, payload_document,
-                         payload_schema_version, content_hash, previous_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                         payload_schema_version, content_hash, previous_hash,
+                         payload_commitment, presentation_payload, presentation_hash,
+                         canonicalization_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?)
                     ON CONFLICT (record_id) DO NOTHING
                     """,
                     record.recordId(),
@@ -238,7 +256,11 @@ public class AuditRecordRepository {
                     toJson(record.payload()),
                     record.payloadSchemaVersion(),
                     record.contentHash(),
-                    record.previousHash());
+                    record.previousHash(),
+                    record.payloadCommitment(),
+                    toJson(record.presentationPayload()),
+                    record.presentationHash(),
+                    record.canonicalizationVersion());
             jdbcTemplate.update("""
                     UPDATE audit_record
                     SET archived_at = CURRENT_TIMESTAMP
@@ -272,13 +294,17 @@ public class AuditRecordRepository {
         return jdbcTemplate.query("""
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record
                 WHERE chain_id = ? AND sequence = ?
                 UNION ALL
                 SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
                        resource_id, occurred_at, recorded_at, payload_document,
-                       payload_schema_version, content_hash, previous_hash
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
                 FROM audit_record_archive
                 WHERE chain_id = ? AND sequence = ?
                 LIMIT 1
@@ -337,7 +363,99 @@ public class AuditRecordRepository {
                 readJson(resultSet.getString("payload_document")),
                 resultSet.getInt("payload_schema_version"),
                 resultSet.getString("content_hash"),
-                resultSet.getString("previous_hash"));
+                resultSet.getString("previous_hash"),
+                resultSet.getString("payload_commitment"),
+                readJson(resultSet.getString("presentation_payload")),
+                resultSet.getString("presentation_hash"),
+                resultSet.getInt("canonicalization_version"));
+    }
+
+    public Optional<AuditRecord> lockById(UUID recordId) {
+        return jdbcTemplate.query("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version
+                FROM audit_record WHERE record_id = ? FOR UPDATE
+                """, resultSet -> resultSet.next()
+                ? Optional.of(mapRecord(resultSet)) : Optional.empty(), recordId);
+    }
+
+    public List<FieldCommitment> findFieldCommitments(UUID recordId) {
+        return jdbcTemplate.query("""
+                SELECT commitment_id, record_id, path, format_version, algorithm, digest, salt
+                FROM audit_field_commitment WHERE record_id = ? ORDER BY path
+                """, (rs, row) -> new FieldCommitment(
+                (UUID) rs.getObject("commitment_id"), (UUID) rs.getObject("record_id"),
+                rs.getString("path"), rs.getInt("format_version"),
+                rs.getString("algorithm"), rs.getString("digest"), rs.getBytes("salt")), recordId);
+    }
+
+    public Optional<FieldCommitment> findFieldCommitment(UUID recordId, String path) {
+        return findFieldCommitments(recordId).stream()
+                .filter(commitment -> commitment.path().equals(path)).findFirst();
+    }
+
+    public void insertFieldCommitment(UUID commitmentId, UUID recordId, String path,
+                                      int formatVersion, String algorithm, String digest, byte[] salt) {
+        jdbcTemplate.update("""
+                INSERT INTO audit_field_commitment
+                    (commitment_id, record_id, path, format_version, algorithm, digest, salt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, commitmentId, recordId, path, formatVersion, algorithm, digest, salt);
+    }
+
+    public List<Redaction> findRedactions(UUID recordId) {
+        return jdbcTemplate.query("""
+                SELECT redaction_id, record_id, path, commitment, reason, requested_by,
+                       created_at, commitment_id, request_key, request_fingerprint,
+                       redaction_sequence, previous_redaction_hash, presentation_hash, operation_hash
+                FROM audit_redaction WHERE record_id = ? ORDER BY redaction_sequence, created_at, redaction_id
+                """, (rs, row) -> mapRedaction(rs), recordId);
+    }
+
+    public Optional<Redaction> findRedactionByRequestKey(String requestKey) {
+        return jdbcTemplate.query("""
+                SELECT redaction_id, record_id, path, commitment, reason, requested_by,
+                       created_at, commitment_id, request_key, request_fingerprint,
+                       redaction_sequence, previous_redaction_hash, presentation_hash, operation_hash
+                FROM audit_redaction WHERE request_key = ?
+                """, resultSet -> resultSet.next()
+                ? Optional.of(mapRedaction(resultSet)) : Optional.empty(), requestKey);
+    }
+
+    public void insertRedaction(Redaction redaction) {
+        jdbcTemplate.update("""
+                INSERT INTO audit_redaction
+                    (redaction_id, record_id, path, commitment, reason, requested_by,
+                     created_at, commitment_id, request_key, request_fingerprint,
+                     redaction_sequence, previous_redaction_hash, presentation_hash, operation_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, redaction.redactionId(), redaction.recordId(), redaction.path(),
+                redaction.commitment(), redaction.reason(), redaction.requestedBy(),
+                Timestamp.from(redaction.createdAt()), redaction.commitmentId(),
+                redaction.requestKey(), redaction.requestFingerprint(), redaction.sequence(),
+                redaction.previousRedactionHash(), redaction.presentationHash(), redaction.operationHash());
+    }
+
+    public void updatePresentation(UUID recordId, JsonNode payload, String presentationHash) {
+        int updated = jdbcTemplate.update("""
+                UPDATE audit_record SET presentation_payload = ?, presentation_hash = ?
+                WHERE record_id = ?
+                """, toJson(payload), presentationHash, recordId);
+        if (updated != 1) throw new IllegalStateException("Audit record disappeared during redaction");
+    }
+
+    private Redaction mapRedaction(ResultSet rs) throws SQLException {
+        return new Redaction(
+                (UUID) rs.getObject("redaction_id"), (UUID) rs.getObject("record_id"),
+                rs.getString("path"), rs.getString("commitment"), rs.getString("reason"),
+                rs.getString("requested_by"), rs.getTimestamp("created_at").toInstant(),
+                (UUID) rs.getObject("commitment_id"), rs.getString("request_key"),
+                rs.getString("request_fingerprint"), rs.getLong("redaction_sequence"),
+                rs.getString("previous_redaction_hash"), rs.getString("presentation_hash"),
+                rs.getString("operation_hash"));
     }
 
     private String toJson(JsonNode payload) {
@@ -370,6 +488,21 @@ public class AuditRecordRepository {
     }
 
     public record IdempotencyEntry(String requestFingerprint, UUID recordId) {
+    }
+
+    public record FieldCommitment(
+            UUID commitmentId, UUID recordId, String path, int formatVersion,
+            String algorithm, String digest, byte[] salt) {
+        public FieldCommitment {
+            salt = salt.clone();
+        }
+    }
+
+    public record Redaction(
+            UUID redactionId, UUID recordId, String path, String commitment,
+            String reason, String requestedBy, Instant createdAt, UUID commitmentId,
+            String requestKey, String requestFingerprint, long sequence,
+            String previousRedactionHash, String presentationHash, String operationHash) {
     }
 
     public record Page(List<AuditRecord> records, Long nextSequence) {
