@@ -1,6 +1,7 @@
 package com.vkonatala.auditlog.api;
 
 import com.vkonatala.auditlog.application.append.AuditLogAppender;
+import com.vkonatala.auditlog.application.export.AuditExportService;
 import com.vkonatala.auditlog.application.query.AuditQueryResult;
 import com.vkonatala.auditlog.application.query.AuditQueryService;
 import com.vkonatala.auditlog.application.redaction.AuditRedactionService;
@@ -9,6 +10,8 @@ import com.vkonatala.auditlog.application.verify.AuditVerificationResult;
 import com.vkonatala.auditlog.domain.query.AuditQueryCriteria;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -31,6 +34,8 @@ public class AuditController {
     private final AuditChainVerifier verifier;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AuditRedactionService redactionService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AuditExportService exportService;
 
     public AuditController(
             AuditLogAppender appender,
@@ -91,6 +96,20 @@ public class AuditController {
     @GetMapping("/verify")
     public AuditVerificationResult verify() {
         return verifier.verify();
+    }
+
+    @GetMapping(value = "/exports", produces = "application/zip")
+    public ResponseEntity<byte[]> export(
+            @RequestParam(required = false) String actorId,
+            @RequestParam(required = false) String resourceId) {
+        if (exportService == null) {
+            throw new IllegalStateException("Export service is unavailable");
+        }
+        byte[] bundle = exportService.export(actorId, resourceId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"audit-export.zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(bundle);
     }
 
     public record AuditEventPage(

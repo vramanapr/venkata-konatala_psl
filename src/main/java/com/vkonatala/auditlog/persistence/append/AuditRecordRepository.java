@@ -208,6 +208,44 @@ public class AuditRecordRepository {
                 """, (resultSet, rowNumber) -> mapRecord(resultSet), chainId, chainId);
     }
 
+    /**
+     * Returns the logical chain, merging active rows, soft-archived rows and
+     * rows moved to the archive table without duplicating moved rows.
+     */
+    public List<ExportRecord> findLogicalRecordsForExport(String chainId) {
+        return jdbcTemplate.query("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash,
+                       payload_commitment, presentation_payload, presentation_hash,
+                       canonicalization_version, archived
+                FROM (
+                    SELECT ar.record_id, ar.chain_id, ar.sequence, ar.event_type, ar.actor_id,
+                           ar.resource_type, ar.resource_id, ar.occurred_at, ar.recorded_at,
+                           ar.payload_document, ar.payload_schema_version, ar.content_hash,
+                           ar.previous_hash, ar.payload_commitment, ar.presentation_payload,
+                           ar.presentation_hash, ar.canonicalization_version,
+                           (ar.archived_at IS NOT NULL) AS archived
+                    FROM audit_record ar
+                    WHERE ar.chain_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM audit_record_archive aa
+                          WHERE aa.record_id = ar.record_id
+                      )
+                    UNION ALL
+                    SELECT aa.record_id, aa.chain_id, aa.sequence, aa.event_type, aa.actor_id,
+                           aa.resource_type, aa.resource_id, aa.occurred_at, aa.recorded_at,
+                           aa.payload_document, aa.payload_schema_version, aa.content_hash,
+                           aa.previous_hash, aa.payload_commitment, aa.presentation_payload,
+                           aa.presentation_hash, aa.canonicalization_version, TRUE AS archived
+                    FROM audit_record_archive aa
+                    WHERE aa.chain_id = ?
+                ) logical_records
+                ORDER BY sequence
+                """, (resultSet, rowNumber) -> new ExportRecord(
+                mapRecord(resultSet), resultSet.getBoolean("archived")), chainId, chainId);
+    }
+
     public int markArchivedBefore(Instant cutoff) {
         return jdbcTemplate.update("""
                 UPDATE audit_record
@@ -506,6 +544,9 @@ public class AuditRecordRepository {
     }
 
     public record Page(List<AuditRecord> records, Long nextSequence) {
+    }
+
+    public record ExportRecord(AuditRecord record, boolean archived) {
     }
 
     public record Checkpoint(

@@ -281,6 +281,7 @@ contiguous prefix while records are missing or reordered.
       "commitmentId": "uuid",
       "reason": "privacy request",
       "requestedBy": "principal",
+      "requestFingerprint": "digest",
       "createdAt": "UTC timestamp",
       "redactionSequence": 1,
       "previousRedactionHash": "digest",
