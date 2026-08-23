@@ -83,7 +83,7 @@ class AuditScenarioAIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.events.length()").value(1))
                 .andExpect(jsonPath("$.events[0].sequence").value(1))
-                .andExpect(jsonPath("$.nextSequence").value(2));
+                .andExpect(jsonPath("$.nextSequence").value(1));
 
         mockMvc.perform(get("/api/v1/audit/verify"))
                 .andExpect(status().isOk())
@@ -118,10 +118,144 @@ class AuditScenarioAIT {
                         .value("CONTENT_HASH_MISMATCH"));
     }
 
+    @Test
+    void detectsDirectEventFieldMutation() throws Exception {
+        append("""
+                {
+                  "eventType": "RECORD_UPDATED",
+                  "actorId": "user-1",
+                  "resourceType": "CLIENT_ACCOUNT",
+                  "resourceId": "account-1",
+                  "payload": {"amount": 10},
+                  "timestamp": "2026-08-23T10:15:30Z"
+                }
+                """);
+        jdbcTemplate.update("""
+                UPDATE audit_record
+                SET actor_id = 'different-user'
+                WHERE sequence = 1
+                """);
+
+        mockMvc.perform(get("/api/v1/audit/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intact").value(false))
+                .andExpect(jsonPath("$.firstFailure.violationType")
+                        .value("CONTENT_HASH_MISMATCH"));
+    }
+
+    @Test
+    void detectsDirectContentHashMutation() throws Exception {
+        append("""
+                {
+                  "eventType": "RECORD_UPDATED",
+                  "actorId": "user-1",
+                  "resourceType": "CLIENT_ACCOUNT",
+                  "resourceId": "account-1",
+                  "payload": {"amount": 10},
+                  "timestamp": "2026-08-23T10:15:30Z"
+                }
+                """);
+        jdbcTemplate.update("""
+                UPDATE audit_record
+                SET content_hash = repeat('0', 64)
+                WHERE sequence = 1
+                """);
+
+        mockMvc.perform(get("/api/v1/audit/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intact").value(false))
+                .andExpect(jsonPath("$.firstFailure.violationType")
+                        .value("CONTENT_HASH_MISMATCH"));
+    }
+
+    @Test
+    void detectsDirectPreviousHashMutation() throws Exception {
+        append(eventFor("user-1", "account-1", "RECORD_UPDATED", "10:15:30"));
+        append(eventFor("user-1", "account-1", "RECORD_UPDATED", "10:16:30"));
+        jdbcTemplate.update("""
+                UPDATE audit_record
+                SET previous_hash = repeat('0', 64)
+                WHERE sequence = 2
+                """);
+
+        mockMvc.perform(get("/api/v1/audit/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intact").value(false))
+                .andExpect(jsonPath("$.firstFailure.sequence").value(2))
+                .andExpect(jsonPath("$.firstFailure.violationType")
+                        .value("PREVIOUS_HASH_MISMATCH"));
+    }
+
+    @Test
+    void detectsDeletionOfFinalRecord() throws Exception {
+        append(eventFor("user-1", "account-1", "RECORD_UPDATED", "10:15:30"));
+        append(eventFor("user-1", "account-1", "RECORD_UPDATED", "10:16:30"));
+        jdbcTemplate.update("DELETE FROM audit_record WHERE sequence = 2");
+
+        mockMvc.perform(get("/api/v1/audit/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intact").value(false))
+                .andExpect(jsonPath("$.firstFailure.violationType")
+                        .value("CHAIN_HEAD_MISMATCH"));
+    }
+
+    @Test
+    void queriesByActorEventTypeAndTimeRange() throws Exception {
+        append(eventFor("user-1", "account-1", "USER_LOGIN", "10:15:30"));
+        append(eventFor("user-2", "account-2", "RECORD_UPDATED", "10:16:30"));
+        append(eventFor("user-1", "account-3", "PERMISSION_GRANTED", "10:17:30"));
+
+        mockMvc.perform(get("/api/v1/audit/events")
+                        .param("actorId", "user-1")
+                        .param("eventType", "PERMISSION_GRANTED")
+                        .param("from", "2026-08-23T10:17:00Z")
+                        .param("to", "2026-08-23T10:18:00Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].resourceId").value("account-3"));
+    }
+
+    @Test
+    void traversesLargeResultSetUsingCursors() throws Exception {
+        for (int index = 0; index < 101; index++) {
+            append(eventFor("user-" + index, "account-" + index,
+                    "RECORD_UPDATED", "10:15:30"));
+        }
+
+        mockMvc.perform(get("/api/v1/audit/events").param("limit", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events.length()").value(100))
+                .andExpect(jsonPath("$.nextSequence").value(100));
+
+        mockMvc.perform(get("/api/v1/audit/events")
+                        .param("afterSequence", "100")
+                        .param("limit", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0].sequence").value(101));
+    }
+
     private void append(String eventJson) throws Exception {
         mockMvc.perform(post("/api/v1/audit/events")
                         .contentType(APPLICATION_JSON)
                         .content(eventJson))
                 .andExpect(status().isCreated());
+    }
+
+    private String eventFor(
+            String actorId,
+            String resourceId,
+            String eventType,
+            String time) {
+        return """
+                {
+                  "eventType": "%s",
+                  "actorId": "%s",
+                  "resourceType": "CLIENT_ACCOUNT",
+                  "resourceId": "%s",
+                  "payload": {"source": "test"},
+                  "timestamp": "2026-08-23T%sZ"
+                }
+                """.formatted(eventType, actorId, resourceId, time);
     }
 }

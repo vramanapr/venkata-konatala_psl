@@ -169,8 +169,8 @@ public class AuditRecordRepository {
                 parameters.toArray());
         Long nextSequence = null;
         if (records.size() > criteria.limit()) {
-            AuditRecord cursorRecord = records.remove(criteria.limit());
-            nextSequence = cursorRecord.sequence();
+            records.remove(criteria.limit());
+            nextSequence = records.getLast().sequence();
         }
         return new Page(records, nextSequence);
     }
@@ -184,6 +184,25 @@ public class AuditRecordRepository {
                 WHERE chain_id = ?
                 ORDER BY sequence
                 """, (resultSet, rowNumber) -> mapRecord(resultSet), chainId);
+    }
+
+    public Optional<ChainHead> findChainHead(String chainId) {
+        return jdbcTemplate.query("""
+                SELECT chain_id, next_sequence, last_record_id, genesis_hash, last_hash, version
+                FROM audit_chain_head
+                WHERE chain_id = ?
+                """, resultSet -> {
+            if (!resultSet.next()) {
+                return Optional.empty();
+            }
+            return Optional.of(new ChainHead(
+                    resultSet.getString("chain_id"),
+                    resultSet.getLong("next_sequence"),
+                    (UUID) resultSet.getObject("last_record_id"),
+                    resultSet.getString("genesis_hash"),
+                    resultSet.getString("last_hash"),
+                    resultSet.getLong("version")));
+        }, chainId);
     }
 
     private AuditRecord mapRecord(ResultSet resultSet) throws SQLException {

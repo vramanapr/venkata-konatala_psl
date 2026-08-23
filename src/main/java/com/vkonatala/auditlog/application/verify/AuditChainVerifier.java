@@ -28,9 +28,17 @@ public class AuditChainVerifier {
     public AuditVerificationResult verify() {
         List<com.vkonatala.auditlog.domain.append.AuditRecord> records =
                 repository.findAllForVerification(DEFAULT_CHAIN_ID);
+        var chainHead = repository.findChainHead(DEFAULT_CHAIN_ID);
         String expectedPreviousHash = AuditHashChain.GENESIS_HASH;
         long expectedSequence = 1;
         long verifiedThroughSequence = 0;
+
+        if (records.isEmpty()) {
+            if (chainHead.isPresent() && chainHead.get().nextSequence() != 1) {
+                return failure(0, null, 0, "CHAIN_HEAD_MISMATCH");
+            }
+            return new AuditVerificationResult(true, 0, null);
+        }
 
         for (var record : records) {
             if (record.sequence() != expectedSequence) {
@@ -78,6 +86,16 @@ public class AuditChainVerifier {
             expectedPreviousHash = record.contentHash();
             expectedSequence++;
             verifiedThroughSequence = record.sequence();
+        }
+
+        if (chainHead.isEmpty()
+                || chainHead.get().nextSequence() != expectedSequence
+                || !chainHead.get().lastHash().equals(expectedPreviousHash)) {
+            return failure(
+                    verifiedThroughSequence,
+                    records.getLast().recordId().toString(),
+                    records.getLast().sequence(),
+                    "CHAIN_HEAD_MISMATCH");
         }
 
         return new AuditVerificationResult(true, verifiedThroughSequence, null);
