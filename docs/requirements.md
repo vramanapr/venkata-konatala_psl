@@ -187,6 +187,149 @@ and should not be presented as requirements originating from the assignment.
   order, but dedicated rejection or reordering tests for out-of-order
   timestamps are out of scope.
 
+## Implementation contract status
+
+This section is the gate for implementation tasks. Items marked **Approved**
+may be implemented. Items marked **Proposed - requires approval** are
+engineering recommendations, not silently accepted requirements. Dependent
+implementation tasks must remain blocked until their required decisions are
+approved.
+
+### Approved contracts
+
+| Area | Approved contract |
+| --- | --- |
+| Hash algorithm | SHA-256, using the complete digest and a consistent encoding. |
+| Chain ordering | Immutable database sequence/commit order; caller timestamps do not reorder records. |
+| Out-of-order timestamps | No rejection, reordering, or reconciliation requirement based solely on timestamp order. |
+| Append-only behavior | No public update or delete API for audit records. |
+| Required event fields | `eventType`, `actorId`, `resourceType`, `resourceId`, `payload`, and `timestamp`. |
+| Verification endpoint | `GET /audit/verify` must report intact/broken status and the first inconsistency with a violation type. |
+
+### Proposed contracts requiring approval
+
+#### Timestamp contract
+
+- **Proposed contract:** Store caller-supplied `occurredAt` as optional business
+  time and always assign immutable server `recordedAt` as ingestion time.
+- `recordedAt` is not supplied by callers and is not used to reorder an
+  already-committed chain.
+- Both timestamps use UTC `TIMESTAMPTZ` semantics.
+- **Reason:** Preserves event occurrence context while providing a trusted
+  server-side timestamp.
+- **Open approval:** Whether `occurredAt` is optional, and whether future or
+  excessively old values should be rejected.
+
+#### Record identity and ordering contract
+
+- **Proposed contract:** Generate a UUID `recordId` and allocate a
+  monotonically increasing `sequence` from a locked chain-head row.
+- Use one global chain for the initial implementation.
+- **Reason:** UUIDs provide stable external identity while the sequence provides
+  deterministic chain order.
+- **Open approval:** Whether the production system must support multiple
+  tenant/domain chains.
+
+#### Duplicate and retry contract
+
+- **Proposed contract:** Require an `Idempotency-Key` for clients that need
+  retry safety. The key is bound to a request fingerprint.
+- Repeating the same key and fingerprint returns the original result.
+- Reusing a key with a different fingerprint returns `409 Conflict`.
+- Requests without a key are treated as distinct events.
+- **Reason:** Avoids duplicate retries without collapsing legitimate repeated
+  business events.
+- **Open approval:** Idempotency-key retention duration and whether the header
+  is mandatory for all clients.
+
+#### Canonical serialization contract
+
+- **Proposed contract:** Hash a versioned canonical JSON envelope containing the
+  event fields and payload.
+- Use UTF-8, lexicographically sorted object keys, no insignificant
+  whitespace, UTC timestamps with fixed precision, deterministic number
+  formatting, and explicit null/absent-field rules.
+- Persist the canonicalization version with each record.
+- **Reason:** Repeated serialization must produce byte-identical hash input.
+- **Open approval:** Exact canonical JSON standard/library, timestamp precision,
+  number normalization, and Unicode normalization policy.
+
+#### Genesis contract
+
+- **Proposed contract:** Use a documented, versioned fixed genesis value per
+  chain, represented as the predecessor hash of the first record.
+- **Reason:** Allows an independent verifier to reproduce the first link.
+- **Limitation:** A fixed genesis alone does not detect an attacker who rewrites
+  the entire database and recomputes every hash.
+- **Open approval:** External chain-head anchoring and whether future
+  deployments require a distinct genesis per tenant/domain.
+
+#### API contract
+
+- **Proposed baseline endpoints:**
+  - `POST /api/v1/audit/events`
+  - `GET /api/v1/audit/events`
+  - `GET /api/v1/audit/verify`
+  - `POST /api/v1/audit/events/{recordId}/redactions`
+  - `GET /api/v1/audit/exports`
+- Query pagination uses an opaque cursor ordered by immutable sequence.
+- Verification returns `intact`, verified sequence information, and a
+  structured first-failure object.
+- **Open approval:** Exact status codes, error envelope, export format,
+  authentication mechanism, and whether export is synchronous or job-based.
+
+#### Retention contract
+
+- **Proposed contract:** Archive records rather than physically delete them.
+  Archived records remain part of the logical chain and are included in
+  verification.
+- Copy and hash-verify records before marking them archived.
+- Initial scope does not include permanent destruction.
+- **Reason:** Preserves verifiability while reducing the active dataset.
+- **Open approval:** Retention duration, archive location, schedule, query
+  visibility, restoration behavior, and legal deletion requirements.
+
+#### Redaction contract
+
+- **Proposed contract:** Establish field commitments at ingestion, keep the
+  original audit record immutable, and store redaction operations separately as
+  append-only metadata.
+- Redaction changes the returned representation, not the original content hash.
+- Sensitive originals may be encrypted and made unrecoverable by key
+  destruction, subject to an approved key-management design.
+- **Reason:** Avoids invalidating the chain when a sensitive field is redacted.
+- **Open approval:** Field-path syntax, commitment/salt scheme, reversibility,
+  authorization, redaction event requirements, and whether encrypted originals
+  are retained.
+
+#### Authentication and authorization contract
+
+- **Proposed contract:** Use bearer-token authentication with deny-by-default
+  scopes for write, read, verify, redact, export, and retention administration.
+- Enforce tenant/resource boundaries for read, export, and redaction.
+- **Reason:** Audit records can contain sensitive account and identity data.
+- **Open approval:** Identity provider, token format, tenant model, local
+  development mode, and database-level row security requirements.
+
+#### Non-functional contract
+
+- **Proposed contract:** Define measurable prototype limits for payload size,
+  page size, export size, verification duration, and append timeout.
+- Do not claim availability, throughput, disaster recovery, or multi-region
+  guarantees until targets are approved.
+- **Reason:** The assignment provides no numeric operational targets.
+- **Open approval:** Performance budgets, availability objectives, recovery
+  objectives, deployment topology, and observability platform.
+
+### Implementation gate
+
+Before starting TASK-002 and later dependent tasks, a reviewer should approve
+the proposed contracts that affect the intended scope. At minimum, the
+canonicalization rules, genesis value, timestamp fields, idempotency behavior,
+retention model, redaction model, API error contract, and authentication model
+must be approved. Until then, those items remain assumptions requiring human
+review, not implemented requirements.
+
 ## Engineering decision and clarification register
 
 The following register expands every ambiguity identified above. No option is
