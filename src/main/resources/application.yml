@@ -13,6 +13,17 @@ spring:
     init:
       mode: never
 
+audit:
+  retention:
+    enabled: ${AUDIT_RETENTION_ENABLED:true}
+    window: ${AUDIT_RETENTION_WINDOW:365d}
+    interval-ms: ${AUDIT_RETENTION_INTERVAL_MS:3600000}
+    mode: ${AUDIT_RETENTION_MODE:SOFT_DELETE}
+    batch-size: ${AUDIT_RETENTION_BATCH_SIZE:500}
+  checkpoint:
+    enabled: ${AUDIT_CHECKPOINT_ENABLED:true}
+    interval-ms: ${AUDIT_CHECKPOINT_INTERVAL_MS:3600000}
+
 management:
   endpoints:
     web:

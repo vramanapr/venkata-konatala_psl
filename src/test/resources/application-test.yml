@@ -6,3 +6,9 @@ spring:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
       - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
       - org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration
+
+audit:
+  retention:
+    enabled: false
+  checkpoint:
+    enabled: false

@@ -34,7 +34,8 @@ public class AuditChainVerifier {
         long verifiedThroughSequence = 0;
 
         if (records.isEmpty()) {
-            if (chainHead.isPresent() && chainHead.get().nextSequence() != 1) {
+            if ((chainHead.isPresent() && chainHead.get().nextSequence() != 1)
+                    || repository.findLatestCheckpoint(DEFAULT_CHAIN_ID).isPresent()) {
                 return failure(0, null, 0, "CHAIN_HEAD_MISMATCH");
             }
             return new AuditVerificationResult(true, 0, null);
@@ -96,6 +97,24 @@ public class AuditChainVerifier {
                     records.getLast().recordId().toString(),
                     records.getLast().sequence(),
                     "CHAIN_HEAD_MISMATCH");
+        }
+
+        var checkpoint = repository.findLatestCheckpoint(DEFAULT_CHAIN_ID);
+        if (checkpoint.isPresent()) {
+            if (checkpoint.get().throughSequence() > verifiedThroughSequence
+                    || !checkpoint.get().lastHash().equals(
+                    records.stream()
+                            .filter(record -> record.sequence()
+                                    == checkpoint.get().throughSequence())
+                            .findFirst()
+                            .map(record -> record.contentHash())
+                            .orElse(null))) {
+                return failure(
+                        verifiedThroughSequence,
+                        records.getLast().recordId().toString(),
+                        records.getLast().sequence(),
+                        "CHECKPOINT_MISMATCH");
+            }
         }
 
         return new AuditVerificationResult(true, verifiedThroughSequence, null);

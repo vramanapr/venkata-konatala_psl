@@ -8,6 +8,7 @@ import com.vkonatala.auditlog.domain.query.AuditQueryCriteria;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -130,6 +131,7 @@ public class AuditRecordRepository {
                        payload_schema_version, content_hash, previous_hash
                 FROM audit_record
                 WHERE chain_id = ?
+                  AND archived_at IS NULL
                 """);
         List<Object> parameters = new ArrayList<>();
         parameters.add(chainId);
@@ -181,9 +183,124 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash
                 FROM audit_record
+                WHERE chain_id = ? AND archived_at IS NULL
+                UNION ALL
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record_archive
                 WHERE chain_id = ?
                 ORDER BY sequence
-                """, (resultSet, rowNumber) -> mapRecord(resultSet), chainId);
+                """, (resultSet, rowNumber) -> mapRecord(resultSet), chainId, chainId);
+    }
+
+    public int markArchivedBefore(Instant cutoff) {
+        return jdbcTemplate.update("""
+                UPDATE audit_record
+                SET archived_at = CURRENT_TIMESTAMP
+                WHERE archived_at IS NULL
+                  AND recorded_at < ?
+                """, timestamp(cutoff));
+    }
+
+    public int archiveToTableBefore(Instant cutoff, int batchSize) {
+        List<AuditRecord> eligibleRecords = jdbcTemplate.query("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record
+                WHERE archived_at IS NULL
+                  AND recorded_at < ?
+                ORDER BY sequence
+                LIMIT ?
+                FOR UPDATE SKIP LOCKED
+                """, (resultSet, rowNumber) -> mapRecord(resultSet),
+                timestamp(cutoff), batchSize);
+
+        for (AuditRecord record : eligibleRecords) {
+            jdbcTemplate.update("""
+                    INSERT INTO audit_record_archive
+                        (record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                         resource_id, occurred_at, recorded_at, payload_document,
+                         payload_schema_version, content_hash, previous_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                    ON CONFLICT (record_id) DO NOTHING
+                    """,
+                    record.recordId(),
+                    record.chainId(),
+                    record.sequence(),
+                    record.eventType(),
+                    record.actorId(),
+                    record.resourceType(),
+                    record.resourceId(),
+                    timestamp(record.occurredAt()),
+                    timestamp(record.recordedAt()),
+                    toJson(record.payload()),
+                    record.payloadSchemaVersion(),
+                    record.contentHash(),
+                    record.previousHash());
+            jdbcTemplate.update("""
+                    UPDATE audit_record
+                    SET archived_at = CURRENT_TIMESTAMP
+                    WHERE record_id = ? AND archived_at IS NULL
+                    """, record.recordId());
+        }
+        return eligibleRecords.size();
+    }
+
+    public Optional<Checkpoint> findLatestCheckpoint(String chainId) {
+        return jdbcTemplate.query("""
+                SELECT checkpoint_id, chain_id, through_sequence, last_hash, created_at
+                FROM audit_chain_checkpoint
+                WHERE chain_id = ?
+                ORDER BY through_sequence DESC
+                LIMIT 1
+                """, resultSet -> {
+            if (!resultSet.next()) {
+                return Optional.empty();
+            }
+            return Optional.of(new Checkpoint(
+                    (UUID) resultSet.getObject("checkpoint_id"),
+                    resultSet.getString("chain_id"),
+                    resultSet.getLong("through_sequence"),
+                    resultSet.getString("last_hash"),
+                    resultSet.getTimestamp("created_at").toInstant()));
+        }, chainId);
+    }
+
+    public Optional<AuditRecord> findBySequence(String chainId, long sequence) {
+        return jdbcTemplate.query("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record
+                WHERE chain_id = ? AND sequence = ?
+                UNION ALL
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record_archive
+                WHERE chain_id = ? AND sequence = ?
+                LIMIT 1
+                """, resultSet -> {
+            if (!resultSet.next()) {
+                return Optional.empty();
+            }
+            return Optional.of(mapRecord(resultSet));
+        }, chainId, sequence, chainId, sequence);
+    }
+
+    public void insertCheckpoint(
+            UUID checkpointId,
+            String chainId,
+            long throughSequence,
+            String lastHash) {
+        jdbcTemplate.update("""
+                INSERT INTO audit_chain_checkpoint
+                    (checkpoint_id, chain_id, through_sequence, last_hash)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (chain_id, through_sequence) DO NOTHING
+                """, checkpointId, chainId, throughSequence, lastHash);
     }
 
     public Optional<ChainHead> findChainHead(String chainId) {
@@ -256,5 +373,13 @@ public class AuditRecordRepository {
     }
 
     public record Page(List<AuditRecord> records, Long nextSequence) {
+    }
+
+    public record Checkpoint(
+            UUID checkpointId,
+            String chainId,
+            long throughSequence,
+            String lastHash,
+            java.time.Instant createdAt) {
     }
 }
