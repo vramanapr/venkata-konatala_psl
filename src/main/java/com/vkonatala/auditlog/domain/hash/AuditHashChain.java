@@ -1,6 +1,7 @@
 package com.vkonatala.auditlog.domain.hash;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
@@ -52,6 +53,10 @@ public class AuditHashChain {
         hashInput.put("previousHash", previousHash);
 
         return new AuditHash(hashService.hash(hashInput), previousHash);
+    }
+
+    public String hashEventContent(JsonNode eventContent) {
+        return hashService.hash(eventContent);
     }
 
     private static void requireHash(String hash, String fieldName) {
