@@ -4,10 +4,15 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vkonatala.auditlog.domain.append.AuditRecord;
+import com.vkonatala.auditlog.domain.query.AuditQueryCriteria;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -114,21 +119,89 @@ public class AuditRecordRepository {
             if (!resultSet.next()) {
                 return Optional.empty();
             }
-            return Optional.of(new AuditRecord(
-                    (UUID) resultSet.getObject("record_id"),
-                    resultSet.getString("chain_id"),
-                    resultSet.getLong("sequence"),
-                    resultSet.getString("event_type"),
-                    resultSet.getString("actor_id"),
-                    resultSet.getString("resource_type"),
-                    resultSet.getString("resource_id"),
-                    resultSet.getTimestamp("occurred_at").toInstant(),
-                    resultSet.getTimestamp("recorded_at").toInstant(),
-                    readJson(resultSet.getString("payload_document")),
-                    resultSet.getInt("payload_schema_version"),
-                    resultSet.getString("content_hash"),
-                    resultSet.getString("previous_hash")));
+            return Optional.of(mapRecord(resultSet));
         }, recordId);
+    }
+
+    public Page findPage(String chainId, AuditQueryCriteria criteria) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record
+                WHERE chain_id = ?
+                """);
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(chainId);
+
+        if (criteria.actorId() != null) {
+            sql.append(" AND actor_id = ?");
+            parameters.add(criteria.actorId());
+        }
+        if (criteria.resourceType() != null) {
+            sql.append(" AND resource_type = ? AND resource_id = ?");
+            parameters.add(criteria.resourceType());
+            parameters.add(criteria.resourceId());
+        }
+        if (criteria.eventType() != null) {
+            sql.append(" AND event_type = ?");
+            parameters.add(criteria.eventType());
+        }
+        if (criteria.from() != null) {
+            sql.append(" AND occurred_at >= ?");
+            parameters.add(timestamp(criteria.from()));
+        }
+        if (criteria.to() != null) {
+            sql.append(" AND occurred_at <= ?");
+            parameters.add(timestamp(criteria.to()));
+        }
+        if (criteria.afterSequence() > 0) {
+            sql.append(" AND sequence > ?");
+            parameters.add(criteria.afterSequence());
+        }
+
+        sql.append(" ORDER BY sequence LIMIT ?");
+        parameters.add(criteria.limit() + 1);
+
+        List<AuditRecord> records = jdbcTemplate.query(
+                sql.toString(),
+                (resultSet, rowNumber) -> mapRecord(resultSet),
+                parameters.toArray());
+        Long nextSequence = null;
+        if (records.size() > criteria.limit()) {
+            AuditRecord cursorRecord = records.remove(criteria.limit());
+            nextSequence = cursorRecord.sequence();
+        }
+        return new Page(records, nextSequence);
+    }
+
+    public List<AuditRecord> findAllForVerification(String chainId) {
+        return jdbcTemplate.query("""
+                SELECT record_id, chain_id, sequence, event_type, actor_id, resource_type,
+                       resource_id, occurred_at, recorded_at, payload_document,
+                       payload_schema_version, content_hash, previous_hash
+                FROM audit_record
+                WHERE chain_id = ?
+                ORDER BY sequence
+                """, (resultSet, rowNumber) -> mapRecord(resultSet), chainId);
+    }
+
+    private AuditRecord mapRecord(ResultSet resultSet) throws SQLException {
+        Timestamp occurredAt = resultSet.getTimestamp("occurred_at");
+        return new AuditRecord(
+                (UUID) resultSet.getObject("record_id"),
+                resultSet.getString("chain_id"),
+                resultSet.getLong("sequence"),
+                resultSet.getString("event_type"),
+                resultSet.getString("actor_id"),
+                resultSet.getString("resource_type"),
+                resultSet.getString("resource_id"),
+                occurredAt == null ? null : occurredAt.toInstant(),
+                resultSet.getTimestamp("recorded_at").toInstant(),
+                readJson(resultSet.getString("payload_document")),
+                resultSet.getInt("payload_schema_version"),
+                resultSet.getString("content_hash"),
+                resultSet.getString("previous_hash"));
     }
 
     private String toJson(JsonNode payload) {
@@ -161,5 +234,8 @@ public class AuditRecordRepository {
     }
 
     public record IdempotencyEntry(String requestFingerprint, UUID recordId) {
+    }
+
+    public record Page(List<AuditRecord> records, Long nextSequence) {
     }
 }
