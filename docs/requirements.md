@@ -159,6 +159,34 @@ for review rather than hidden defaults:
 These decisions should be recorded with their rationale before implementation
 and should not be presented as requirements originating from the assignment.
 
+## Approved decisions
+
+### AD-01: Hash algorithm
+
+- **Decision:** Use SHA-256 for event content hashes and predecessor hashes.
+- **Scope:** Store the complete digest, encoded consistently, together with
+  the hash/version metadata needed for future verification.
+- **Rationale:** SHA-256 is widely supported, suitable for tamper detection,
+  and straightforward for independent verification.
+- **Remaining decision:** The canonical serialization format and exact hash
+  input must still be finalized before implementation.
+
+### AD-02: Timestamp ordering
+
+- **Decision:** Out-of-order timestamp handling is omitted as a functional
+  requirement.
+- **Interpretation:** Timestamps do not determine chain order, and the service
+  does not need to reject, reorder, or reconcile events based on timestamp
+  order.
+- **Chain ordering:** The immutable database sequence/commit order remains the
+  authoritative audit-record order.
+- **Requirement retained:** The timestamp field still requires a documented
+  source and meaning, such as caller-supplied occurrence time or
+  server-assigned recording time.
+- **Testing impact:** Tests should verify that chain order follows sequence
+  order, but dedicated rejection or reordering tests for out-of-order
+  timestamps are out of scope.
+
 ## Engineering decision and clarification register
 
 The following register expands every ambiguity identified above. No option is
