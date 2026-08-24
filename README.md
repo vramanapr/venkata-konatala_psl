@@ -66,6 +66,15 @@ Flyway applies database migrations during startup. Health is available at:
 http://localhost:8080/actuator/health
 ```
 
+To disable application security globally for a local prototype run:
+
+```bash
+export AUDIT_SECURITY_ENABLED=false
+```
+
+This permits API requests without authentication and must not be used outside
+an isolated development environment.
+
 ### Run tests
 
 ```bash
@@ -77,6 +86,32 @@ Run the PostgreSQL/Testcontainers integration tests when Docker is available:
 ```bash
 mvn verify
 ```
+
+## Test and coverage artifacts
+
+Behavioral coverage is documented in
+[`docs/scenario-a-test-strategy.md`](docs/scenario-a-test-strategy.md). The
+corresponding test artifacts are organized as follows:
+
+- `src/test/java/com/vkonatala/auditlog/domain/hash/`: canonicalization and
+  hash-chain unit tests.
+- `src/test/java/com/vkonatala/auditlog/domain/redaction/`: path, commitment,
+  and projection tests.
+- `src/test/java/com/vkonatala/auditlog/application/`: append concurrency,
+  retention, checkpoint, and export tests.
+- `src/test/java/com/vkonatala/auditlog/api/`: validation, query,
+  verification, redaction, export, authentication, and delegation tests.
+- `AuditControllerTest` and `AuditScenarioAIT` explicitly set
+  `audit.security.enabled=false` so API contract coverage can run without
+  credentials; `AuditSecurityApiTest` covers the enabled-security behavior
+  separately.
+- `src/test/java/com/vkonatala/auditlog/AuditSchemaIT.java` and
+  `PostgreSqlConnectionIT.java`: schema and database connectivity tests.
+
+Run `mvn test` for non-container tests. Run `mvn verify` with Docker available
+for the Testcontainers integration artifacts. The project does not currently
+include a line-coverage reporting plugin; these artifacts provide behavioral
+and integration coverage rather than a numeric coverage percentage.
 
 ## Documentation
 

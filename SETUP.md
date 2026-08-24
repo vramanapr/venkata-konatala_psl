@@ -44,6 +44,15 @@ Security is enabled by default. Configure at least one local user and scope:
 export AUDIT_SECURITY_USERS='writer=change-writer-password|audit:write,reader=change-reader-password|audit:read+audit:verify,admin=change-admin-password|audit:admin'
 ```
 
+To disable security globally for an isolated local development run:
+
+```bash
+export AUDIT_SECURITY_ENABLED=false
+```
+
+This disables authentication and authorization for the application. Never use
+this setting in a shared, staging, or production environment.
+
 Supported prototype scopes are:
 
 - `audit:write`

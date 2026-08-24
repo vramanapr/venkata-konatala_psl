@@ -68,6 +68,18 @@ class AuditControllerTest {
     }
 
     @Test
+    void allowsUnauthenticatedApiCoverageWhenSecurityIsDisabled() throws Exception {
+        when(appender.append(any(), any())).thenReturn(record(1));
+
+        mockMvc.perform(post("/api/v1/audit/events")
+                        .contentType(APPLICATION_JSON)
+                        .content(validEvent()))
+                .andExpect(status().isCreated());
+
+        verify(appender).append(any(), any());
+    }
+
+    @Test
     void rejectsMissingRequiredField() throws Exception {
         mockMvc.perform(post("/api/v1/audit/events")
                         .contentType(APPLICATION_JSON)

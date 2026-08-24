@@ -25,6 +25,7 @@ integration tests use Testcontainers and should run with Docker available.
 | A-17 | Fail an append after record insertion is attempted. | integration, database, failure/chaos | The record, idempotency state, and chain head all roll back. |
 | A-18 | Retry a request with the same idempotency key. | API, integration | Same request returns the original record; conflicting reuse returns `409 Conflict`. |
 | A-19 | Query a large history. | integration, database, failure/chaos | Results remain bounded by the page limit and all records can be traversed without duplication or omission. |
+| A-20 | Run API coverage with application security disabled. | API, configuration | An unauthenticated valid request reaches the controller and is tested against the API contract; this does not validate authentication or authorization. |
 
 ## Execution levels
 
@@ -36,9 +37,11 @@ integration tests use Testcontainers and should run with Docker available.
   real transactions, direct datastore mutation, and chain verification.
 - **Failure/chaos:** Transaction-trigger failures, concurrent appends,
   deletion, mutation, and large-history traversal.
-- **Security:** Scenario A has no authentication implementation yet. Security
-  authorization tests are deferred to the security task and must not be
-  mistaken for Scenario A coverage.
+- **Security:** API contract coverage explicitly disables security through
+  `audit.security.enabled=false` in `AuditControllerTest` and
+  `AuditScenarioAIT`. Authentication, authorization, and delegation coverage
+  remain separate in `AuditSecurityApiTest`; they must not be inferred from
+  the security-disabled API scenarios.
 
 ## Exit criteria
 
