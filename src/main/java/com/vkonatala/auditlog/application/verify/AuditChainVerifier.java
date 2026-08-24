@@ -75,15 +75,14 @@ public class AuditChainVerifier {
 
             AuditHash expectedHash;
             try {
-                expectedHash = hashChain.append(
-                        new AuditEvent(
-                                record.eventType(),
-                                record.actorId(),
-                                record.resourceType(),
-                                record.resourceId(),
-                                record.payload(),
-                                record.occurredAt()),
-                        record.previousHash());
+                AuditEvent event = record.canonicalizationVersion() == 0
+                        ? new AuditEvent(record.eventType(), record.actorId(),
+                        record.resourceType(), record.resourceId(), record.payload(),
+                        record.occurredAt())
+                        : new AuditEvent(record.eventType(), record.actorId(),
+                        record.resourceType(), record.resourceId(), record.payload(),
+                        record.occurredAt(), record.authorization());
+                expectedHash = hashChain.append(event, record.previousHash());
             } catch (IllegalArgumentException exception) {
                 return failure(
                         verifiedThroughSequence,

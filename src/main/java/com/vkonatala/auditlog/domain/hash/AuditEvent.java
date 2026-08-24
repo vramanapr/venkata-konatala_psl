@@ -10,7 +10,19 @@ public record AuditEvent(
         String resourceType,
         String resourceId,
         JsonNode payload,
-        Instant timestamp) {
+        Instant timestamp,
+        AuditAuthorizationEvidence authorization) {
+
+    public AuditEvent(
+            String eventType,
+            String actorId,
+            String resourceType,
+            String resourceId,
+            JsonNode payload,
+            Instant timestamp) {
+        this(eventType, actorId, resourceType, resourceId, payload, timestamp,
+                AuditAuthorizationEvidence.legacy(actorId));
+    }
 
     public AuditEvent {
         requireText(eventType, "eventType");
@@ -22,6 +34,13 @@ public record AuditEvent(
         }
         if (timestamp == null) {
             throw new IllegalArgumentException("timestamp must not be null");
+        }
+        if (authorization == null) {
+            throw new IllegalArgumentException("authorization must not be null");
+        }
+        if (!actorId.equals(authorization.effectiveActor())) {
+            throw new IllegalArgumentException(
+                    "actorId must match authorization effectiveActor");
         }
         payload = payload.deepCopy();
     }

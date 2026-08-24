@@ -17,7 +17,14 @@ public record AuditEventResponse(
         Instant recordedAt,
         JsonNode payload,
         String contentHash,
-        String previousHash) {
+        String previousHash,
+        String principal,
+        String effectiveActor,
+        String delegatedBy,
+        String authorizationOutcome,
+        String authorizationPolicy,
+        String authorizationReason,
+        JsonNode requestContext) {
 
     public static AuditEventResponse from(AuditRecord record) {
         return new AuditEventResponse(
@@ -31,6 +38,13 @@ public record AuditEventResponse(
                 record.recordedAt(),
                 record.presentationPayload(),
                 record.contentHash(),
-                record.previousHash());
+                record.previousHash(),
+                record.authorization().principal(),
+                record.authorization().effectiveActor(),
+                record.authorization().delegatedBy(),
+                record.authorization().outcome(),
+                record.authorization().policy(),
+                record.authorization().reason(),
+                record.authorization().requestContext());
     }
 }

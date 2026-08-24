@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vkonatala.auditlog.domain.append.AuditRecord;
+import com.vkonatala.auditlog.domain.hash.AuditAuthorizationEvidence;
 import com.vkonatala.auditlog.domain.query.AuditQueryCriteria;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -59,8 +60,10 @@ public class AuditRecordRepository {
                      resource_id, occurred_at, recorded_at, payload_document,
                      payload_schema_version, content_hash, previous_hash,
                      payload_commitment, presentation_payload, presentation_hash,
-                     canonicalization_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                     canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                     authorization_outcome, authorization_policy, authorization_reason, request_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """,
                 record.recordId(),
                 record.chainId(),
@@ -77,7 +80,11 @@ public class AuditRecordRepository {
                 record.payloadCommitment(),
                 toJson(record.presentationPayload()),
                 record.presentationHash(),
-                record.canonicalizationVersion());
+                record.canonicalizationVersion(),
+                record.authorization().principal(), record.authorization().effectiveActor(),
+                record.authorization().delegatedBy(), record.authorization().outcome(),
+                record.authorization().policy(), record.authorization().reason(),
+                toJson(record.authorization().requestContext()));
     }
 
     public void updateChainHead(String chainId, long nextSequence, UUID lastRecordId, String lastHash) {
@@ -121,7 +128,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record
                 WHERE record_id = ?
                 """, resultSet -> {
@@ -138,7 +146,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record
                 WHERE chain_id = ?
                   AND archived_at IS NULL
@@ -193,7 +202,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record
                 WHERE chain_id = ? AND archived_at IS NULL
                 UNION ALL
@@ -201,7 +211,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record_archive
                 WHERE chain_id = ?
                 ORDER BY sequence
@@ -218,13 +229,18 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version, archived
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context,
+                       archived
                 FROM (
                     SELECT ar.record_id, ar.chain_id, ar.sequence, ar.event_type, ar.actor_id,
                            ar.resource_type, ar.resource_id, ar.occurred_at, ar.recorded_at,
                            ar.payload_document, ar.payload_schema_version, ar.content_hash,
                            ar.previous_hash, ar.payload_commitment, ar.presentation_payload,
                            ar.presentation_hash, ar.canonicalization_version,
+                           ar.principal_id, ar.effective_actor_id, ar.delegated_by,
+                           ar.authorization_outcome, ar.authorization_policy, ar.authorization_reason,
+                           ar.request_context,
                            (ar.archived_at IS NOT NULL) AS archived
                     FROM audit_record ar
                     WHERE ar.chain_id = ?
@@ -237,7 +253,10 @@ public class AuditRecordRepository {
                            aa.resource_type, aa.resource_id, aa.occurred_at, aa.recorded_at,
                            aa.payload_document, aa.payload_schema_version, aa.content_hash,
                            aa.previous_hash, aa.payload_commitment, aa.presentation_payload,
-                           aa.presentation_hash, aa.canonicalization_version, TRUE AS archived
+                           aa.presentation_hash, aa.canonicalization_version,
+                           aa.principal_id, aa.effective_actor_id, aa.delegated_by,
+                           aa.authorization_outcome, aa.authorization_policy, aa.authorization_reason,
+                           aa.request_context, TRUE AS archived
                     FROM audit_record_archive aa
                     WHERE aa.chain_id = ?
                 ) logical_records
@@ -261,7 +280,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record
                 WHERE archived_at IS NULL
                   AND recorded_at < ?
@@ -278,8 +298,10 @@ public class AuditRecordRepository {
                          resource_id, occurred_at, recorded_at, payload_document,
                          payload_schema_version, content_hash, previous_hash,
                          payload_commitment, presentation_payload, presentation_hash,
-                         canonicalization_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                         canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                         authorization_outcome, authorization_policy, authorization_reason, request_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?,
+                            ?, ?, ?, ?, ?, ?, ?::jsonb)
                     ON CONFLICT (record_id) DO NOTHING
                     """,
                     record.recordId(),
@@ -298,7 +320,11 @@ public class AuditRecordRepository {
                     record.payloadCommitment(),
                     toJson(record.presentationPayload()),
                     record.presentationHash(),
-                    record.canonicalizationVersion());
+                    record.canonicalizationVersion(),
+                    record.authorization().principal(), record.authorization().effectiveActor(),
+                    record.authorization().delegatedBy(), record.authorization().outcome(),
+                    record.authorization().policy(), record.authorization().reason(),
+                    toJson(record.authorization().requestContext()));
             jdbcTemplate.update("""
                     UPDATE audit_record
                     SET archived_at = CURRENT_TIMESTAMP
@@ -334,7 +360,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record
                 WHERE chain_id = ? AND sequence = ?
                 UNION ALL
@@ -342,7 +369,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record_archive
                 WHERE chain_id = ? AND sequence = ?
                 LIMIT 1
@@ -405,7 +433,15 @@ public class AuditRecordRepository {
                 resultSet.getString("payload_commitment"),
                 readJson(resultSet.getString("presentation_payload")),
                 resultSet.getString("presentation_hash"),
-                resultSet.getInt("canonicalization_version"));
+                resultSet.getInt("canonicalization_version"),
+                new AuditAuthorizationEvidence(
+                        resultSet.getString("principal_id"),
+                        resultSet.getString("effective_actor_id"),
+                        resultSet.getString("delegated_by"),
+                        resultSet.getString("authorization_outcome"),
+                        resultSet.getString("authorization_policy"),
+                        resultSet.getString("authorization_reason"),
+                        readJson(resultSet.getString("request_context"))));
     }
 
     public Optional<AuditRecord> lockById(UUID recordId) {
@@ -414,7 +450,8 @@ public class AuditRecordRepository {
                        resource_id, occurred_at, recorded_at, payload_document,
                        payload_schema_version, content_hash, previous_hash,
                        payload_commitment, presentation_payload, presentation_hash,
-                       canonicalization_version
+                       canonicalization_version, principal_id, effective_actor_id, delegated_by,
+                       authorization_outcome, authorization_policy, authorization_reason, request_context
                 FROM audit_record WHERE record_id = ? FOR UPDATE
                 """, resultSet -> resultSet.next()
                 ? Optional.of(mapRecord(resultSet)) : Optional.empty(), recordId);

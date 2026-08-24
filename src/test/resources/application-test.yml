@@ -8,6 +8,8 @@ spring:
       - org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration
 
 audit:
+  security:
+    enabled: false
   retention:
     enabled: false
   checkpoint:

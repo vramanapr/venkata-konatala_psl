@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vkonatala.auditlog.domain.hash.AuditEvent;
+import com.vkonatala.auditlog.domain.hash.AuditAuthorizationEvidence;
 import com.vkonatala.auditlog.domain.hash.AuditHashChain;
 import com.vkonatala.auditlog.domain.hash.CanonicalJsonSerializer;
 import com.vkonatala.auditlog.domain.hash.Sha256HashService;
@@ -217,11 +218,28 @@ public class AuditExportVerifier {
             }
             try {
                 JsonNode payload = row.path("payload");
+                boolean legacyEnvelope = row.path("canonicalizationVersion").asInt(1) == 0
+                        || !row.has("principal");
+                AuditEvent exportedEvent = legacyEnvelope
+                        ? new AuditEvent(row.path("eventType").asText(), row.path("actorId").asText(),
+                        row.path("resourceType").asText(), row.path("resourceId").asText(),
+                        payload, Instant.parse(row.path("occurredAt").asText()))
+                        : new AuditEvent(row.path("eventType").asText(), row.path("actorId").asText(),
+                        row.path("resourceType").asText(), row.path("resourceId").asText(),
+                        payload, Instant.parse(row.path("occurredAt").asText()),
+                        new AuditAuthorizationEvidence(
+                                row.path("principal").asText(row.path("actorId").asText()),
+                                row.path("effectiveActor").asText(row.path("actorId").asText()),
+                                row.path("delegatedBy").isNull() ? null
+                                        : row.path("delegatedBy").asText(),
+                                row.path("authorizationOutcome").asText("ALLOWED"),
+                                row.path("authorizationPolicy").asText("audit:write"),
+                                row.path("authorizationReason").asText("legacy record"),
+                                row.path("requestContext").isObject()
+                                        ? row.path("requestContext")
+                                        : objectMapper.createObjectNode()));
                 String recomputed = new AuditHashChain(objectMapper, hashes).append(
-                        new AuditEvent(row.path("eventType").asText(), row.path("actorId").asText(),
-                                row.path("resourceType").asText(), row.path("resourceId").asText(),
-                                payload, Instant.parse(row.path("occurredAt").asText())),
-                        row.path("previousHash").asText()).contentHash();
+                        exportedEvent, row.path("previousHash").asText()).contentHash();
                 boolean hasRedactionMarker = payload.toString().contains("\"redacted\":true");
                 if (!hasRedactionMarker && !recomputed.equals(row.path("contentHash").asText())) {
                     failures.add(failure("CHAIN", "CONTENT_HASH_MISMATCH",

@@ -50,6 +50,16 @@ public class AuditHashChain {
         hashInput.put("resourceId", event.resourceId());
         hashInput.put("timestamp", TIMESTAMP_FORMATTER.format(event.timestamp()));
         hashInput.set("payload", event.payload());
+        ObjectNode authorization = hashInput.putObject("authorization");
+        AuditAuthorizationEvidence evidence = event.authorization();
+        authorization.put("principal", evidence.principal());
+        authorization.put("effectiveActor", evidence.effectiveActor());
+        if (evidence.delegatedBy() == null) authorization.putNull("delegatedBy");
+        else authorization.put("delegatedBy", evidence.delegatedBy());
+        authorization.put("authorizationOutcome", evidence.outcome());
+        authorization.put("authorizationPolicy", evidence.policy());
+        authorization.put("authorizationReason", evidence.reason());
+        authorization.set("requestContext", evidence.requestContext());
         hashInput.put("previousHash", previousHash);
 
         return new AuditHash(hashService.hash(hashInput), previousHash);

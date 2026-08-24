@@ -14,6 +14,10 @@ spring:
       mode: never
 
 audit:
+  security:
+    enabled: ${AUDIT_SECURITY_ENABLED:true}
+    # Comma-separated: username=password|audit:write+audit:read
+    users: ${AUDIT_SECURITY_USERS:}
   export:
     signature:
       enabled: ${AUDIT_EXPORT_SIGNATURE_ENABLED:false}

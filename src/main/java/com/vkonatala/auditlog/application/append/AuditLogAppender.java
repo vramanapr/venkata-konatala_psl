@@ -106,7 +106,8 @@ public class AuditLogAppender {
                 hashChain.hashEventContent(event.payload()),
                 event.payload(),
                 hashChain.hashEventContent(event.payload()),
-                1);
+                1,
+                event.authorization());
 
         repository.insert(record);
         for (var commitment : fieldCommitmentService.generate(record.recordId(), event.payload())) {
@@ -130,6 +131,16 @@ public class AuditLogAppender {
         eventContent.put("resourceId", event.resourceId());
         eventContent.put("timestamp", event.timestamp().toString());
         eventContent.set("payload", event.payload());
+        var authorization = eventContent.putObject("authorization");
+        var evidence = event.authorization();
+        authorization.put("principal", evidence.principal());
+        authorization.put("effectiveActor", evidence.effectiveActor());
+        if (evidence.delegatedBy() == null) authorization.putNull("delegatedBy");
+        else authorization.put("delegatedBy", evidence.delegatedBy());
+        authorization.put("authorizationOutcome", evidence.outcome());
+        authorization.put("authorizationPolicy", evidence.policy());
+        authorization.put("authorizationReason", evidence.reason());
+        authorization.set("requestContext", evidence.requestContext());
         return hashChain.hashEventContent(eventContent);
     }
 }

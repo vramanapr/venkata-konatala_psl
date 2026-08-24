@@ -203,6 +203,14 @@ public class AuditExportService {
         json.put("selection", selected ? "SELECTED" : "CHAIN_CONTEXT");
         json.put("eventType", record.eventType());
         json.put("actorId", record.actorId());
+        json.put("principal", record.authorization().principal());
+        json.put("effectiveActor", record.authorization().effectiveActor());
+        if (record.authorization().delegatedBy() == null) json.putNull("delegatedBy");
+        else json.put("delegatedBy", record.authorization().delegatedBy());
+        json.put("authorizationOutcome", record.authorization().outcome());
+        json.put("authorizationPolicy", record.authorization().policy());
+        json.put("authorizationReason", record.authorization().reason());
+        json.set("requestContext", record.authorization().requestContext());
         json.put("resourceType", record.resourceType());
         json.put("resourceId", record.resourceId());
         putInstant(json, "occurredAt", record.occurredAt());
